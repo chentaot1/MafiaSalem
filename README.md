@@ -218,7 +218,7 @@ flowchart LR
 
 | Step | Command / code | What happens |
 |------|------------------|--------------|
-| **Queue** | `!join` · `!leave` | Players join a persisted waiting list; one active game per player guild-wide |
+| **Queue** | `!join` · `!leave` | Players join a persisted waiting list; one active game per player guild-wide. **`!join` is blocked** when disk still has `cleanup_pending`, stale ended game JSON, or matching `pending_endgame` (see [Recovery orchestration](#recovery-orchestration--ops-hardening)) |
 | **Preview** | `!players` (≥5p) | Shows [`game_roles.py`](game_roles.py) pool embed — dupes, NK caps, Witch/Exe constraints |
 | **Start** | `!startgame` (GM) | DM permission check → `Game.setup_infrastructure` → role draw → deal |
 
@@ -435,9 +435,14 @@ Phases persist progress into `night_completion_snapshot` so crash-resume skips c
 
 ```python
 # Simplified checkpoint flags in night_completion_snapshot
+transport_control_complete   # + blocked[] payload for Chaos resume
 chaos_phase_complete
+chaos_roll_in_progress       # mid-roll targets saved before effect applies
 misc_phase_complete          # + healed_by / protected_by maps
 investigative_phase_complete
+killing_phase_complete
+gk_sk_witch_notify_complete  # Gatekeeper / SK / Witch DMs sent once
+night_engine_running         # set at pipeline entry for resume classification
 night_engine_completed       # kills resolved
 night_feedback_sent          # DMs delivered
 post_pipeline_pending        # guilt / psychic / announce remain
@@ -466,7 +471,9 @@ Transport-aware visit destinations and crash-resume algebra: [Effective visit al
 
 ### Why three visit rebuilds after Chaos (not a convergence loop)
 
-Chaos can inject a **new transport swap** or **roleblock** mid-pipeline. Visits, blocking, and transport pruning depend on each other: a blocked transporter drops their swap, which changes visits, which changes blocking again. The implementation **hard-unrolls three rebuild passes** after Chaos (see `engine/night.py` — not a `while stable` loop). Each pass matches a step in that chain so Lookout, combat, and alert use the same world state as kills. A future refactor could replace the fixed ×3 with a bounded fixpoint loop plus a test that proves convergence.
+Chaos can inject a **new transport swap** or **roleblock** mid-pipeline. Visits, blocking, and transport pruning depend on each other: a blocked transporter drops their swap, which changes visits, which changes blocking again. After Chaos, `_rebuild_visits_blocking_after_chaos_mutations` loops prune passes until swaps stabilize (max 8); if the cap is hit, one final prune + rebuild still runs so Lookout, combat, and alert match kills.
+
+Crash-resume checkpoints: `transport_control_complete` (with `blocked`), `chaos_phase_complete`, `misc_phase_complete`, `investigative_phase_complete`, `killing_phase_complete`, `gk_sk_witch_notify_complete`, then `post_pipeline_pending` for guilt/psychic/announce. Post-engine snapshots **merge** into the existing snap (`_merge_snap`) so mid-pipeline fields are not dropped.
 
 Spec: [`MAFIASALEM_GDD.md` §5](MAFIASALEM_GDD.md) · player copy: [`MAFIA_GAME_GUIDE.md`](MAFIA_GAME_GUIDE.md)
 
@@ -568,7 +575,7 @@ await game.start_night(_ChanCtx(channel))
 Tribunal resume is **deadline-driven**, separate from night pipeline checkpoints. On gateway reconnect (`bot_app/bootstrap.py`):
 
 1. If `vote_in_progress` but game channel deleted → `_bailout_tribunal_resume` (refund + full teardown)
-2. Else spawn **at most one** resume task by subphase priority: **defense → judgment → last words → guilty finisher**
+2. Else spawn **at most one** resume task by subphase priority: **defense → judgment → last words → guilty finisher** (`_spawn_tribunal_resume_once` idempotent guard; default `TRIBUNAL_RESUME_MIN_SECONDS=30`)
 3. Each task sleeps **remaining seconds** from persisted UTC deadline, then calls the same helper as live play (`_complete_tribunal_after_defense`, `_tribunal_run_judgment_deadline_and_tally`, `_tribunal_last_words_phase`, `_finish_guilty_tribunal`)
 
 **Abort refund:** if a defendant reached the stand but judgment never completes (deleted message, fetch error, phase change, restart bailout), `_refund_tribunal_daily_if_consumed` decrements `votes_today` so the town does not lose a trial day for no verdict.
@@ -956,6 +963,24 @@ Runbook: [`scripts/monte_carlo/README.md`](scripts/monte_carlo/README.md)
 
 Beyond the night pipeline and tribunal UX, the live bot includes **crash-recovery**, **endgame stats commits**, and **ToS-accurate endgame logic** — persistence, resume, and idempotent commit patterns suited to long-running game state.
 
+### Recovery orchestration & ops hardening
+
+Endgame recovery spans **game JSON**, stats `_meta`, and SQLite. [`game_recovery.py`](game_recovery.py) centralizes the dangerous paths:
+
+| Concern | Mechanism |
+|---------|-----------|
+| **Commit before delete** | `commit_pending_endgame_before_state_delete()` runs before `!reset` / `!nuke_reset`, cold-boot stale cleanup, and reconnect `cleanup_pending` reset — while matching game JSON still exists |
+| **Lobby clobber** | `lobby_join_blocked_reason()` gates `!join` when disk shows deferred endgame or stale ended state |
+| **Disk vs memory** | `get_game_for_guild` loads stale-ended JSON into memory (not a blank placeholder); `!bothealth` shows `disk_recovery_summary()` when disk truth differs |
+| **Pending marker durability** | `pending_endgame` writes to stats `_meta`; on meta failure, fallback file `{guild}.pending_endgame.json` |
+| **Guild I/O lock** | `persistence.guild_persist_lock()` serializes JSON/stats writes across `Game` instances |
+| **Strict deploy** | `MAFIABOT_STRICT_CONFIG=1` fails bot start if SQLite init fails (no silent `bot.db=None`) |
+| **Instance lock** | OS file descriptor held for process lifetime; released on shutdown (`_release_single_instance_lock`) |
+| **Gateway supervisor** | `_connect_forever` retries after normal `bot.start()` return (no exit on clean session end) |
+| **State directory** | Optional `MAFIABOT_STATE_DIR` overrides default `state/` beside `persistence.py` |
+
+Hardened audit regression: [`tests/test_hardened_audit_fixes.py`](tests/test_hardened_audit_fixes.py), [`tests/test_audit_remaining_fixes.py`](tests/test_audit_remaining_fixes.py).
+
 ### Phased night checkpoint & `!resolve` resume
 
 If the process dies mid-`!resolve`, the game does **not** restart the night from scratch or double-apply kills. `night_completion_snapshot` records **which pipeline phases finished** — chaos, misc, investigative, engine complete, feedback sent — and `night_resume.parse_night_resume_state` classifies the resume path:
@@ -1007,7 +1032,7 @@ def effective_visit_destinations_map(game):
 
 ### Endgame stats — SQLite + legacy JSON mirror
 
-Endgame commits are **idempotent** with **`game_key`** deduplication. **SQLite is the source of truth**; a **JSON file mirror** remains for embed/leaderboard code paths that still call `load_stats` — legacy from an earlier stats layout, not a performance requirement (SQLite would suffice alone). If JSON write fails after SQL succeeds, the small `stats_mirror_repair.repair_guild_json_mirror_from_sqlite` helper rebuilds the mirror from SQLite on next boot.
+Endgame commits are **idempotent** with **`game_key`** deduplication. **SQLite is the source of truth**; a **JSON file mirror** remains for embed/leaderboard code paths that still call `load_stats` — legacy from an earlier stats layout, not a performance requirement (SQLite would suffice alone). After each successful SQLite endgame commit, `repair_guild_json_mirror_from_sqlite` refreshes the JSON `players` snapshot; on cold boot, bootstrap also repairs when the stats JSON file is **absent**.
 
 ```python
 # stats_mirror_repair.py
@@ -1063,7 +1088,7 @@ flowchart LR
 | Store | Role |
 |-------|------|
 | `state/mafiabot.db` | Canonical leaderboards, per-game history, stats-board channel/message ids, DM outbox |
-| `state/{guild_id}.stats.json` | Read mirror / export; rebuilt from SQLite on failure (`stats_mirror_repair.py`) |
+| `state/{guild_id}.stats.json` | Read mirror / export; refreshed after each SQLite endgame commit; cold-boot repair when file absent (`stats_mirror_repair.py`) |
 
 Each finished game gets a minted **`game_key`** (`guild_id:started_at:nonce`). Commits are **idempotent** — if both SQLite and JSON already recorded the key, the handler skips re-application but still schedules a board refresh.
 
@@ -1120,7 +1145,7 @@ def schedule_stats_board_refresh(*, bot, guild_id):
     asyncio.get_running_loop().create_task(_run())
 ```
 
-GM maintenance: `!refreshstatsboard`, `!exportstats` / `!importstats` (JSON ↔ SQLite with timestamped backup). Ops notes: [`STATS.md`](STATS.md).
+GM maintenance: `!refreshstatsboard`, `!exportstats` / `!importstats` (JSON ↔ SQLite with timestamped backup; destructive overwrite requires `!importstats force confirm`). Ops notes: [`STATS.md`](STATS.md).
 
 #### Review contracts (LB01–LB07)
 
@@ -1151,9 +1176,10 @@ REGISTERED_ACTION_TYPES[spec.name] = spec.action_type
 - **Claims batches**, marks `sending`, delivers, marks `sent`
 - **Requeues stale `sending`** rows after 5 minutes (crash mid-send)
 - **Retries with backoff** — 429 rate limits respect `retry_after`
+- **`enqueue_or_requeue_dm_outbox`** — re-queues terminal `failed` rows with the same dedupe key (e.g. GAME OVER after max attempts)
 - **Respawns on `on_ready`** after reconnect so the queue keeps draining
 
-Static check: every `enqueue_dm_outbox` call in product code **must pass `dedupe_key`** (`check_pending_enqueue_dm_outbox_requires_dedupe_key`).
+Static check: every `enqueue_dm_outbox` call in product code **must pass `dedupe_key`** (`check_pending_enqueue_dm_outbox_requires_dedupe_key`). GAME OVER uses `enqueue_or_requeue_dm_outbox` so dedupe does not block recovery after a failed row.
 
 ```python
 # engine/night.py — fall back to outbox when member not in cache
@@ -1195,7 +1221,7 @@ flowchart TB
   CR --> REIT
   CML --> REV
   AST --> REV
-  REIT --> CI["pytest CI"]
+  REIT --> CI["pytest CI\n.github/workflows/pytest.yml"]
   REV --> CI
 ```
 
@@ -1252,7 +1278,7 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 - **Balance authority** — parallel MC at millions of trials drove lobby manifests (7p **4T·1M·2N**, 5p/6p full neutral pools vs limited bracket).
 - **Correctness engineering** — pytest engine tests + `sim_test` oracles + MC parity bridge; static AST smoke where the bot is hard to boot in CI.
 - **Two custom QA systems** — `sim_test` (scenario harness over production `run_night_pipeline`) and Monte Carlo (large-trial balance runs on real engine nights).
-- **Production hardening** — phased `!resolve` resume, effective-visit algebra, idempotent endgame commits + JSON mirror repair, ToS1 stalemate + draw-override win graph.
+- **Production hardening** — phased `!resolve` resume, effective-visit algebra, idempotent endgame commits + JSON mirror repair, recovery orchestrator (`game_recovery.py`), ToS1 stalemate + draw-override win graph.
 - **Regression lattice** — 53 critical issues + 168 combat master items + reiterating guards + review contract suites.
 - **Operational resilience** — JSON persist, mid-night checkpoints, tribunal resume, staged death announce resume (CR18).
 - **Social day layer** — private-channel whispers with fail-closed delivery, DM-only last wills with modal editor and five-step death reveal.
@@ -1266,8 +1292,11 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 ```bash
 pip install -r requirements-dev.txt
 
-# pytest + static smoke checks (1,135 cases)
-python -m pytest tests/ -q --tb=no
+# pytest + static smoke checks (excludes slow night_sim; matches CI)
+python -m pytest tests/ -q -m "not night_sim" --tb=no
+
+# Hardened audit regression (49-item pass)
+python -m pytest tests/test_hardened_audit_fixes.py tests/test_audit_remaining_fixes.py tests/test_master_audit_fixes_round2.py -q
 
 # sim_test — behavioral QA
 python scripts/sim_test.py --scenarios-only
