@@ -1,24 +1,32 @@
-# Monte Carlo balance simulator
+# Monte Carlo — methodology (public) vs engine (private)
 
-**Public slice:** competence model, statistical day/lynch layer, night-AI heuristics (`config.py`, `day.py`, `night_ai.py`, `state.py`).  
-**Private (full repo):** engine-backed nights via `bridge.py` → `engine/night.run_night_pipeline`.
+This folder on GitHub shows **how** balance simulation models pub lobbies. It does **not** include night resolution — that lives in private `engine/night.py` behind `bridge.py`.
 
-**Monte Carlo type:** many randomized trials → win-rate estimates; nights are **deterministic given actions** (private engine); days are a **heuristic tribunal model**. See root [`README.md`](../../README.md#monte-carlo-simulator--statistical-balance-on-real-rules).
+## What you can read here
 
-## Public modules (this repo)
+| Module | Teaches you… |
+|--------|----------------|
+| `config.py` | Three-axis competence model (`targeting` / `usage` / `day`), role difficulties, `MC_ACTION_JITTER` |
+| `day.py` | Suspicion scores → lynch attempt probability → faction-aware guilty/innocent weights |
+| `night_ai.py` | Heuristic night targeting (who Town/Mafia/neutrals aim at when skill &lt; optimal) |
+| `state.py` | Lightweight `Player` model + pick helpers (no engine state machine) |
+| `role_universe.py` | 32-role taxonomy for sim (no Discord deployment IDs) |
 
-| Module | Contents |
-|--------|----------|
-| `role_universe.py` | 32-role taxonomy (no Discord IDs) |
-| `config.py` | Three-axis competence model, `MC_ACTION_JITTER`, role difficulties |
-| `day.py` | Suspicion → trial probability → faction-weighted guilty votes |
-| `night_ai.py` | Pub-lobby targeting heuristics (who to heal/RB/investigate) |
-| `state.py` | `Player` dataclass + pick/heuristic helpers |
-| `report.py` / `diagnostics_report.py` | Trial output formatting (used with private `generator.py`) |
+## What stays private
 
-## Private modules (not on GitHub)
+`bridge.py`, `simulate.py`, `generator.py`, `wins.py`, `monte_carlo_sim.py` — wire night actions into `run_night_pipeline` and aggregate millions of trials.
 
-`bridge.py`, `simulate.py`, `generator.py`, `wins.py`, `monte_carlo_sim.py`, `mc_preflight.py` — require `engine/night.py` and `game.py`.
+## Hybrid model (why this split is intentional)
+
+```text
+  [published]  night_ai → picks actions (heuristic)
+  [private]    bridge   → run_night_pipeline → deaths, DMs, visit logs
+  [published]  day.py   → evidence → lynch (statistical, not Discord tribunal)
+```
+
+Nights are deterministic given actions; randomness is in **lobby draws, AI choices, and day votes**. Publishing `day.py` + `config.py` shows the balance *science* without shipping kill-order or transport algebra.
+
+See root [`README.md`](../../README.md) for full architecture and design decisions.
 
 ## Quick start (private repo only)
 
@@ -27,44 +35,16 @@ python scripts/monte_carlo_sim.py --quiet --generator-trials 2000 --player-count
 python scripts/mc_preflight.py --parity
 ```
 
-## Before big baselines (1M+ trials)
-
-1. `python scripts/mc_preflight.py --parity`
-2. Or manually: `--audit`, `--parity-nights`, pytest per `MAFIASALEM_ROADMAP.md` §8.1
-
-Large scripts (`_baseline_final_5_6_7_1m.py`, etc.) often disable engine invariants for speed — run preflight after **any** `engine/night.py` change.
-
-## Role / balance change checklist
+## Role / balance change checklist (private repo paths)
 
 | Step | File |
 |------|------|
 | 1 | `config.py` — lists, immunities |
 | 2 | `game_roles.py` — generator |
-| 3 | `engine/night.py` — resolution |
-| 4 | `scripts/monte_carlo/config.py` — `ROLE_META`, difficulties |
-| 5 | `scripts/monte_carlo/night_ai.py` |
-| 6 | `scripts/monte_carlo/bridge.py` — `_player_to_role_state` |
-| 7 | `game.py` / `faction_win_logic.py` — wins |
-| 8 | `scripts/monte_carlo/day.py` — if day/lynch behavior changes |
-| 9 | `scripts/sim_test.py` — edge-case scenario |
-| 10 | `reanimate_expand.py` — if Retributionist corpses change |
-| 11 | `python scripts/mc_preflight.py --parity` |
-
-## Shared with production
-
-- Nights: `reanimate_expand.py`, `run_night_pipeline`
-- Faction wins: `faction_win_logic.py`
-- Two-player stalemate: `stalemate_wins.py`
-- Draw overrides: `draw_override_wins.py`
-
-## Engine QA (separate tool)
-
-`python scripts/sim_test.py` — behavioral scenarios (outcome asserts), fuzz, optional systematic matrices.
-
-Fast regression: `python scripts/sim_test.py --scenarios-only` (~47 scripted nights, ~few seconds).
-
-Power deep (recommended): `python scripts/sim_test.py --deep` — scenarios, fuzz, parallel exhaustive (all 7p ×5 nights), sampled 2/3/4-way systematic (~30 min parallel).
-
-Soak: `python scripts/sim_test.py --quad` (~6 min) or `--penta` (~35 min) — full cartesian on 4 role-sets; crash hunt, not logic oracles.
-
-Middle ground: `--systematic-actions --systematic-role-sets 500 --systematic-sample 24 --jobs 12`
+| 3 | `engine/night.py` — resolution (**private**) |
+| 4 | `scripts/monte_carlo/config.py` — `ROLE_META`, difficulties (**public**) |
+| 5 | `scripts/monte_carlo/night_ai.py` (**public**) |
+| 6 | `scripts/monte_carlo/bridge.py` (**private**) |
+| 7 | `game.py` / `faction_win_logic.py` — wins (**private**) |
+| 8 | `scripts/monte_carlo/day.py` — lynch behavior (**public**) |
+| 9 | `scripts/sim_test.py` — edge-case scenario (**private**) |

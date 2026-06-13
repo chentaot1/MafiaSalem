@@ -1,22 +1,35 @@
 # MafiaSalem
 
-**Town-of-Salem-style mechanics on Discord — a ~2,450-line deterministic night engine, layered regression tests (pytest + static smoke checks), crash-resumable tribunal state, and Monte Carlo balance trials.**
+**Town-of-Salem-style Discord game — portfolio focused on *how* balance and QA work, not on shipping the rules engine.**
 
-> Portfolio write-up · Implementation was **AI-assisted** under my specs and design reviews. **Published:** README + limited MC methodology source + sim_test docs. **Private:** night engine, bot, full trial runners.
+> This repo shows **methodology and design**: Monte Carlo day/AI models, competence tuning, sim_test architecture, and the decisions they drove. The **core night engine** (`engine/night.py`), Discord bot, and engine-backed trial runners stay **private**. Implementation was AI-assisted under my specs and reviews.
+
+---
+
+## What you can learn here (without the engine)
+
+| Question | Where it’s answered |
+|----------|---------------------|
+| How do you balance a 32-role lobby without guessing? | [Monte Carlo hybrid model](#monte-carlo-simulator--statistical-balance-on-real-rules) + published `day.py` / `config.py` |
+| How do you model average pub players, not optimal Town? | [Three-axis competence model](#three-axis-competence-model) in `scripts/monte_carlo/config.py` |
+| How do you regression-test a 2,450-line night pipeline? | [sim_test architecture](#sim_test--how-night-qa-works) + [47-scenario catalog](scripts/sim_test/README.md) |
+| What design calls did trials actually change? | [Balance decisions in practice](#balance-decisions-in-practice) (7p manifest, parallel workers) |
+| How does the full system fit together? | Diagrams and prose below — **architecture only**; resolution code is not published |
+
+**What stays private:** visit-order resolution, transport/control/Chaos rebuild, combat tiers, per-role night effects, `game.py`, tribunal/bot UX, and anything that would let someone clone the rules engine.
 
 ---
 
 ## Public vs private
 
-| **Published on GitHub** | **Private (local only)** |
-|-------------------------|---------------------------|
-| This README — architecture, design decisions, balance methodology | `engine/night.py` — night resolution pipeline (~2,450 lines) |
-| [`scripts/monte_carlo/`](scripts/monte_carlo/) — **day model, competence AI, role heuristics** | `game.py`, `bot_app/`, `bot.py` — Discord bot + game lifecycle |
-| [`scripts/sim_test/README.md`](scripts/sim_test/README.md) — harness architecture + 47-scenario catalog | `scripts/sim_test.py` — runnable scenario/fuzz/systematic harness |
-| [`tests/test_monte_carlo_public.py`](tests/test_monte_carlo_public.py) — tests public MC modules | `bridge.py`, `simulate.py`, `generator.py` — engine-backed trials |
-| | Full pytest suite, smoke checks, guild secrets (`.env`) |
+| **Published — *how* it works** | **Private — *what* resolves nights** |
+|------------------------------|--------------------------------------|
+| README — architecture, workflows, design rationale | `engine/night.py` — ordered night pipeline (~2,450 lines) |
+| [`scripts/monte_carlo/`](scripts/monte_carlo/) — day model, pub-lobby AI, competence math | `game.py`, `bot_app/`, `bot.py` — live game + Discord |
+| [`scripts/sim_test/README.md`](scripts/sim_test/README.md) — QA layers + scenario catalog | `scripts/sim_test.py` — runnable harness |
+| [`tests/test_monte_carlo_public.py`](tests/test_monte_carlo_public.py) — tests published MC math | `bridge.py`, `simulate.py`, `generator.py` — engine-backed trials |
 
-**Why the split:** MC’s value for balance is the **statistical day layer + pub-lobby AI model** — safe to show. Nights use production `run_night_pipeline` — that stays private.
+Think of GitHub as the **lab notebook** (models, process, results). The **rules engine** stays in the private repo.
 
 ### What’s on GitHub (file tree)
 
@@ -39,6 +52,32 @@ tests/
 
 Everything else — `engine/`, `game.py`, `bridge.py`, `simulate.py`, `sim_test.py`, `bot_app/` — is **private**.
 
+```mermaid
+flowchart TB
+  subgraph public["Published on GitHub"]
+    MC_DAY["MC day.py · suspicion → lynch"]
+    MC_AI["MC night_ai.py · pub targeting heuristics"]
+    MC_CFG["MC config.py · competence model"]
+    SIM_DOC["sim_test README · QA process"]
+    README["This README · architecture & decisions"]
+  end
+
+  subgraph private["Private codebase"]
+    ENG["engine/night.py · run_night_pipeline"]
+    GAME["game.py · state & lifecycle"]
+    BRIDGE["MC bridge · sim ↔ engine"]
+    BOT["bot_app · Discord UX"]
+  end
+
+  MC_DAY -->|"feeds evidence scores"| MC_AI
+  MC_CFG --> MC_DAY
+  MC_CFG --> MC_AI
+  README --> SIM_DOC
+  BRIDGE --> ENG
+  SIM_DOC -.->|"oracles against"| ENG
+  MC_AI -.->|"actions in; deaths out"| BRIDGE
+```
+
 ---
 
 ## Design scope — decisions I owned
@@ -53,7 +92,7 @@ This is **original product direction** for a custom rules engine and Discord gam
 | **[Night pipeline](#night-resolution-pipeline)** | Ordered 14-phase interpreter, transport/control ordering, Chaos injection + triple visit rebuild, effective vs raw visit logs, combat-tier killing, mid-pipeline checkpoints — phase order and boundaries defined explicitly in this codebase |
 | **[Custom roles & interactions](#role-roster--32-playable-roles)** | 32-role roster with dupes and neutral pools; per-role state, charges, and cross-role edges (Ret corpses, GA bind, Witch control, Pirate duels, draw-override neutrals, …) |
 | **[Monte Carlo](#monte-carlo-simulator--statistical-balance-on-real-rules)** | Hybrid sim, prod↔sim bridge, competence model, ablation framework — plus **parallel worker pool** (one process per CPU core) so multi-million-trial sweeps are practical |
-| **[sim_test](#sim_test--night-engine-qa-private-source)** | Second runtime stripping Discord I/O while calling the same `run_night_pipeline`; scenario oracles, fuzz, exhaustive 7p role sets, `--deep` systematic matrices |
+| **[sim_test](#sim_test--how-night-qa-works)** | Second runtime stripping Discord I/O while calling the same `run_night_pipeline`; scenario oracles, fuzz, exhaustive 7p role sets, `--deep` systematic matrices |
 | **[Leaderboard & stats](#leaderboard--stats-system)** | SQLite as source of truth, legacy JSON mirror + small repair helper, idempotent `game_key` commits, personal-win taxonomy, live pinned stats board |
 | **[Regression & testing](#regression--test-lattice)** | CR01–CR53 issue registry, 168-item combat master list, static AST smoke checks (where the bot is hard to import in CI), review passes (TCR/LB/DR), reiterating guards — what counts as “fixed” and what gets a permanent guard |
 | **[Tribunal & day UX](#tribunal--day-phase-state-machine)** | Reaction polls, VC mute/stand roles, deadline resume, haunt voter eligibility, trial-day refunds |
@@ -74,7 +113,7 @@ Two examples where I was the decider — infrastructure choice first, then roste
 
 Those calls came from pooled faction rates, per-role **win\|in-lobby** slices, and chunk medians across parallel workers.
 
-The sections below unpack each area for reviewers who want depth without access to the unpublished codebase.
+The sections below describe the **full system at architecture level** for portfolio reviewers. Night-resolution **source code** is not published — you get diagrams, representative excerpts, and the published MC/sim methodology files.
 
 ---
 
@@ -87,7 +126,7 @@ The sections below unpack each area for reviewers who want depth without access 
 | **Discord surface** | ~1,130 lines `bot_app/tribunal.py` · lifecycle · whispers · wills · [↓ section](#game-lifecycle--daynight-loop) |
 | **Automated tests** | **1,135** pytest cases across **83** modules |
 | **Static smoke checks** | **3,400+** lines parsing source with `ast` (`tests/smoke/checks_engine.py` alone) — pragmatic CI guards, not a substitute for integration tests |
-| **Scenario harness** | **~2,470** lines `sim_test.py` (private) — **10M+** pipeline nights in `--deep` · [↓ section](#sim_test--night-engine-qa-private-source) |
+| **Scenario harness** | **~2,470** lines `sim_test.py` (private) — **10M+** pipeline nights in `--deep` · [↓ section](#sim_test--how-night-qa-works) |
 | **Balance simulator** | Engine-backed MC · 500k–1M parallel trials · ablation framework · [↓ section](#monte-carlo-simulator--statistical-balance-on-real-rules) |
 | **Day tribunal** | Reaction polls · VC mute/stand roles · deadline resume · CR01–CR05 · [↓ section](#tribunal--day-phase-state-machine) |
 | **Leaderboards & analytics** | SQLite canonical store · live pinned embed · 13 leaderboard slices · LB01–LB07 · [↓ section](#leaderboard--stats-system) |
@@ -100,7 +139,7 @@ At its core this is a **rules engine with a Discord front-end**, backed by invar
 
 ### On this page
 
-[Design scope](#design-scope--decisions-i-owned) · [Architecture](#architecture--three-runtimes-one-truth) · [Game lifecycle](#game-lifecycle--daynight-loop) · [Night pipeline](#night-resolution-pipeline) · [Tribunal](#tribunal--day-phase-state-machine) · [Static smoke checks](#static-smoke-checks-ast) · [sim_test](#sim_test--night-engine-qa-private-source) · [Monte Carlo](#monte-carlo-simulator--statistical-balance-on-real-rules) · [Production systems](#advanced-production-systems) · [Regression lattice](#regression--test-lattice) · [Running the project](#running-the-project)
+[Design scope](#design-scope--decisions-i-owned) · [Architecture](#architecture--three-runtimes-one-truth) · [Night pipeline](#night-resolution-pipeline) *(described, not published)* · [sim_test](#sim_test--how-night-qa-works) · [Monte Carlo](#monte-carlo-simulator--statistical-balance-on-real-rules) · [Running the project](#running-the-project)
 
 ---
 
@@ -350,6 +389,8 @@ Player rules copy: [`MAFIA_GAME_GUIDE.md`](MAFIA_GAME_GUIDE.md) · staged death 
 ---
 
 ## Night resolution pipeline
+
+> **Architecture described below; implementation not published.** This section explains *what the pipeline does* and *why order matters* — not the source of `engine/night.py`.
 
 Every `!resolve` runs **`run_night_pipeline`** in `engine/night.py` (~2,450 lines). It is a **single ordered interpreter** over `game.night_actions` — not a bag of independent handlers. Order matters: Transporter swaps before Witch rewrites pawn targets; Chaos may inject new swaps/actions; visits are rebuilt **three times** after Chaos; misc heals run before investigative feedback; kills run last on the **effective** visit log (blocked visitors stripped).
 
@@ -699,11 +740,11 @@ Tribunal `finally` checks are the most fragile example — a cleaner long-term f
 
 ---
 
-## sim_test — night-engine QA (private source)
+## sim_test — how night QA works
 
-> **Runnable source is private** (`scripts/sim_test.py`). On GitHub: [`scripts/sim_test/README.md`](scripts/sim_test/README.md) — full **47-scenario catalog**, four-layer architecture, and CLI presets.
+> **Process is public** ([`scripts/sim_test/README.md`](scripts/sim_test/README.md) — layers, 47 scenarios, presets). **Harness source is private** (`scripts/sim_test.py`).
 
-[`scripts/sim_test.py`](scripts/sim_test.py) (~**2,470 lines**, private) is a **behavioral QA harness** that drives the **production** `run_night_pipeline` through a fake Discord surface — no bot token, no guild IDs, no network — while asserting post-night invariants shared with fuzz tests.
+The idea: Discord makes nights hard to test (async, VC, DMs, resume). `sim_test` strips I/O but keeps one oracle path — `run_night_pipeline` — so scenarios assert **exact** deaths, DMs, and visit logs without a live server.
 
 It is closer to a **scenario + property-test runner** (scripted oracles, randomized nights, cartesian action matrices, reproducible failure JSON) than to distributed fault injection — single-threaded rules engine, not a partitioned database.
 
@@ -834,10 +875,10 @@ def assert_post_night_pipeline_invariants(game, out):
 
 ## Monte Carlo simulator — statistical balance on real rules
 
-> **Published on GitHub:** `config.py`, `day.py`, `night_ai.py`, `state.py`, `role_universe.py` — competence model, statistical days, pub-lobby AI.  
-> **Private:** `bridge.py`, `simulate.py`, `generator.py` — engine-backed trial runners (`monte_carlo_sim.py`).
+> **Published:** *how* pub lobbies behave in sim — `config.py` (competence), `day.py` (lynch math), `night_ai.py` (targeting).  
+> **Private:** *what happens when actions resolve* — `bridge.py` → `engine/night.py`.
 
-[`scripts/monte_carlo/`](scripts/monte_carlo/) is a **hybrid simulator**: nights are **100% engine-faithful** (private `engine/night.py`); days are **statistically modeled** in published `day.py` (suspicion accumulation → lynch probability → faction-aware tribunal weights).
+MC is a **hybrid**: nights are engine-exact in the private repo; days are a **statistical model** you can read on GitHub (`suspicion → trial chance → faction-weighted guilty votes`). That’s the part that shows balance *methodology* without exposing kill/transport/control resolution.
 
 ### Is it a "true" Monte Carlo?
 
@@ -1343,18 +1384,18 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 
 ## Running the project
 
-**Clone from GitHub** — browse the MC showcase and run the public test suite:
+**Goal:** explore *how* balance/QA is built — not run the full game.
 
 ```bash
 git clone https://github.com/chentaot1/MafiaSalem.git
 cd MafiaSalem
 pip install pytest
-python -m pytest tests/test_monte_carlo_public.py -q
+python -m pytest tests/test_monte_carlo_public.py -q   # competence + lynch math
 ```
 
-Inspect the published modules under `scripts/monte_carlo/` (competence model, day lynch math, night AI heuristics). Read the sim_test scenario catalog at `scripts/sim_test/README.md`.
+Then read `scripts/monte_carlo/config.py` and `day.py`, and the sim_test catalog at `scripts/sim_test/README.md`.
 
-**Not on GitHub:** `monte_carlo_sim.py`, `engine/night.py`, `scripts/sim_test.py`, Discord bot, full pytest lattice. Those require the private local codebase.
+**Not published:** night engine, Discord bot, `monte_carlo_sim.py`, runnable `sim_test.py`.
 
 ---
 
@@ -1373,10 +1414,10 @@ Screenshots: [`docs/screenshots/`](docs/screenshots/)
 
 ## License
 
-**README + limited MC showcase.** Night engine and Discord bot implementation are private. All rights reserved — not licensed for redistribution or operating as a public bot service.
+**README + MC methodology + sim_test docs.** Shows *how* balance and QA work; core rules engine is private. All rights reserved.
 
 ---
 
 <p align="center">
-  <strong>Portfolio · MC day/AI showcase · sim_test docs · private night engine</strong>
+  <strong>How balance &amp; QA work · methodology published · engine private</strong>
 </p>
