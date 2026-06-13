@@ -48,6 +48,8 @@ scripts/sim_test/
   README.md          # harness architecture + 47-scenario catalog (docs only)
 tests/
   test_monte_carlo_public.py
+scripts/explore_public_mc.py   # runnable demo (competence + lynch output)
+requirements.txt               # pytest
 ```
 
 Everything else — `engine/`, `game.py`, `bridge.py`, `simulate.py`, `sim_test.py`, `bot_app/` — is **private**.
@@ -1384,18 +1386,27 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 
 ## Running the project
 
-**Goal:** explore *how* balance/QA is built — not run the full game.
+**What works from a GitHub clone:** read the published MC modules, run the demo script, and run 4 pytest checks on competence/lynch math.  
+**What does not work:** `monte_carlo_sim.py`, `sim_test.py`, or any night-engine trial — those need the private repo.
+
+From the **repository root** (`MafiaSalem/`, not a parent folder):
 
 ```bash
 git clone https://github.com/chentaot1/MafiaSalem.git
 cd MafiaSalem
-pip install pytest
-python -m pytest tests/test_monte_carlo_public.py -q   # competence + lynch math
+
+pip install -r requirements.txt
+
+# Interactive demo — competence table, lynch curve, sample tribunal weights
+python scripts/explore_public_mc.py
+
+# Automated checks on the same math
+python -m pytest tests/test_monte_carlo_public.py -q
 ```
 
-Then read `scripts/monte_carlo/config.py` and `day.py`, and the sim_test catalog at `scripts/sim_test/README.md`.
+Then browse source: `scripts/monte_carlo/config.py`, `day.py`, `night_ai.py`, and `scripts/sim_test/README.md`.
 
-**Not published:** night engine, Discord bot, `monte_carlo_sim.py`, runnable `sim_test.py`.
+**If imports fail:** you are probably not in the repo root, or you ran a file under `scripts/monte_carlo/` directly. Always `cd MafiaSalem` first; use `python scripts/explore_public_mc.py` or `python -m pytest`, not `python scripts/monte_carlo/config.py`.
 
 ---
 

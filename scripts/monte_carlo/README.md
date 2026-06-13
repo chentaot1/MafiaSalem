@@ -28,7 +28,16 @@ Nights are deterministic given actions; randomness is in **lobby draws, AI choic
 
 See root [`README.md`](../../README.md) for full architecture and design decisions.
 
-## Quick start (private repo only)
+## Quick start (public repo)
+
+```bash
+cd MafiaSalem   # repo root
+pip install -r requirements.txt
+python scripts/explore_public_mc.py
+python -m pytest tests/test_monte_carlo_public.py -q
+```
+
+## Quick start (private repo — full trials)
 
 ```text
 python scripts/monte_carlo_sim.py --quiet --generator-trials 2000 --player-count 7 --seed 42
