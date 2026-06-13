@@ -35,19 +35,10 @@ from draw_override_wins import (
     collect_draw_override_winners,
     resolve_draw_override_outcome,
 )
-from endgame_stats import apply_deltas_to_json_players, compute_player_endgame_deltas, deltas_to_sqlite_payloads
 from guardian_angel_wins import (
     build_outcome_flags_for_game,
     guardian_angel_joint_win,
     guardian_angel_personal_win,
-)
-from personal_win_notify import send_personal_win_dm_if_needed
-from game_recovery import (
-    clear_pending_endgame_meta,
-    commit_and_maybe_delete_game_state,
-    commit_pending_endgame_before_state_delete,
-    delete_game_state_locked,
-    persist_pending_endgame_marker,
 )
 from persistence import is_stale_ended_state, load_state, save_state
 from persistence import load_stats, load_stats_meta, save_stats, save_stats_meta
@@ -58,10 +49,8 @@ from game_state import (
     install_game_state_delegates,
 )
 from engine import night as night_engine
-from player_channels import send_to_player_private_channel
 from messages import tos as tos_msg
 from messages.delivery import dm_member, post_game_channel
-from guild_resolve import resolve_game_guild
 
 ACTION_VERBS: Dict[str, str] = {
     "kill": "kill",
@@ -378,6 +367,13 @@ class Game:
             self._commit_endgame_stats_locked(outcome=outcome, living_ids=living_ids)
 
     def _commit_endgame_stats_locked(self, *, outcome: str, living_ids: List[int]) -> None:
+        from endgame_stats import (
+            apply_deltas_to_json_players,
+            compute_player_endgame_deltas,
+            deltas_to_sqlite_payloads,
+        )
+        from game_recovery import clear_pending_endgame_meta, persist_pending_endgame_marker
+
         participants = list(self.player_roles.keys())
         if not participants:
             return
@@ -1288,6 +1284,8 @@ class Game:
             except discord.HTTPException:
                 pass
 
+        from game_recovery import commit_and_maybe_delete_game_state
+
         commit_and_maybe_delete_game_state(self.guild_id)
 
         # (Already marked ended at the start of reset.)
@@ -1428,6 +1426,8 @@ class Game:
                 await lockdown_role.delete(reason="Nuke reset: removing lockdown role")
             except discord.HTTPException:
                 pass
+
+        from game_recovery import commit_and_maybe_delete_game_state
 
         commit_and_maybe_delete_game_state(self.guild_id)
 
@@ -1809,6 +1809,8 @@ class Game:
                     await player.send(night_body)
                 except discord.HTTPException:
                     pass
+                from player_channels import send_to_player_private_channel
+
                 await send_to_player_private_channel(
                     ctx.guild,
                     p_id,
@@ -1930,6 +1932,8 @@ class Game:
                     await dep.send(deputy_msg)
                 except discord.HTTPException:
                     pass
+                from player_channels import send_to_player_private_channel
+
                 await send_to_player_private_channel(
                     ctx.guild,
                     p_id,
@@ -2011,6 +2015,8 @@ class Game:
                 self._check_win_active = False
 
     async def _check_win_conditions_body(self) -> bool:
+            from guild_resolve import resolve_game_guild
+
             bot = try_get_bot()
             if bot is None:
                 logging.error(
@@ -2434,6 +2440,8 @@ class Game:
 
             # Jester Check (public channel + haunt DM)
             if real_role == "Jester" and cause == "lynch":
+                from personal_win_notify import send_personal_win_dm_if_needed
+
                 await send_personal_win_dm_if_needed(self, member.guild, int(member.id))
                 if voters:
                     await post_game_channel(self, member.guild, tos_msg.jester_revenge_grave())

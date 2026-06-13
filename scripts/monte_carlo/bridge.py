@@ -14,7 +14,7 @@ from engine.night import (
 )
 
 import game as game_module
-from bot_app.night_cmds import _deputy_gun_sees_evil, _deputy_target_basic_defense
+from deputy_rules import _deputy_gun_sees_evil, _deputy_target_basic_defense
 from config import PSYCHIC_ODD_EVIL_NEUTRALS
 from invariants import assert_post_night_pipeline_invariants
 from scripts.monte_carlo import config as mc_config
@@ -542,7 +542,7 @@ async def deputy_day_shot(
     deputy_id: int,
     target_id: int,
 ) -> Set[int]:
-    """Mirror bot_app/night_cmds.py Deputy daytime revolver + process_death."""
+    """Mirror deputy_rules daytime revolver + process_death."""
     deaths: Set[int] = set()
     st = game.role_states.setdefault(deputy_id, {})
     if int(st.get("deputy_shots_remaining", 0)) <= 0:

@@ -2,18 +2,23 @@
 
 **Town-of-Salem-style mechanics on Discord — a ~2,450-line deterministic night engine, layered regression tests (pytest + static smoke checks), crash-resumable tribunal state, and Monte Carlo balance trials.**
 
-> Portfolio repo · **Monte Carlo balance simulator + `sim_test` night-engine harness are published here** (see [`scripts/monte_carlo/`](scripts/monte_carlo/), [`scripts/sim_test.py`](scripts/sim_test.py)). Full Discord bot surface is not published — no tokens, guild secrets, or private channel maps (configure via `.env`). I **did not hand-write the codebase** — implementation was **AI-generated** (Claude, Gemini, ChatGPT, then **Cursor** for multi-file edits) under my specs, reviews, and design calls. This document describes the **systems and decisions I owned**.
+> Portfolio repo · **Monte Carlo + `sim_test` only** — not the Discord bot. No `bot_app/`, tribunal, GM commands, or stats/recovery stack. See [What's published](#whats-published-in-this-repo).
 
 ---
 
 ## What's published in this repo
 
-| Included | Not included |
-|----------|----------------|
-| [`scripts/monte_carlo/`](scripts/monte_carlo/) — balance simulator (engine-backed nights) | Live Discord bot (`bot.py`, tribunal UX, whispers) |
-| [`scripts/sim_test.py`](scripts/sim_test.py) — scenario / fuzz / systematic night QA | Player private-channel ID map (use `MAFIABOT_PRIVATE_CHANNELS_JSON` in `.env`) |
-| [`engine/night.py`](engine/night.py) + shared win/persist modules MC/sim depend on | Deployment guild/role defaults (set IDs in `.env`) |
-| MC + sim pytest suite (`tests/test_monte_*.py`, `tests/test_sim_test_parallel.py`, …) | Full 1,100+ pytest lattice and static smoke suite |
+**Intentionally narrow:** Monte Carlo + `sim_test` + the night engine they exercise — **not** a copy-paste Discord bot.
+
+| Included | Not included (on purpose) |
+|----------|---------------------------|
+| [`scripts/monte_carlo/`](scripts/monte_carlo/) — balance simulator | `bot.py`, `bot_app/` (commands, tribunal, GM UX) |
+| [`scripts/sim_test.py`](scripts/sim_test.py) — night-engine QA harness | Stats SQLite layer (`database.py`, `endgame_stats.py`, …) |
+| [`engine/night.py`](engine/night.py) + shared win/persist modules | Recovery orchestrator (`game_recovery.py`) |
+| MC + sim pytest suite | Full 1,100+ pytest lattice and static smoke suite |
+| [`deputy_rules.py`](deputy_rules.py) — Deputy shot logic shared by MC bridge | Private-channel ID maps (configure via `.env` if self-hosting) |
+
+`bridge.py` imports **`deputy_rules`**, not `bot_app`, so publishing MC/sim does not ship the Discord command surface.
 
 Both tools call the same **`run_night_pipeline`** as production — balance numbers and scenario oracles exercise real night rules, not a reimplementation.
 
