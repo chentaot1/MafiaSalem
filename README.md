@@ -2,29 +2,25 @@
 
 **Town-of-Salem-style mechanics on Discord — a ~2,450-line deterministic night engine, layered regression tests (pytest + static smoke checks), crash-resumable tribunal state, and Monte Carlo balance trials.**
 
-> Portfolio repo · **Monte Carlo + `sim_test` only** — not the Discord bot. No `bot_app/`, tribunal, GM commands, or stats/recovery stack. See [What's published](#whats-published-in-this-repo).
+> **Portfolio README only** — no source code is published. The night engine, Discord bot, Monte Carlo simulator, `sim_test` harness, tests, and deployment config live in a **private local codebase**. I **did not hand-write the implementation** — it was **AI-generated** (Claude, Gemini, ChatGPT, then **Cursor**) under my specs, reviews, and design calls. This document describes the **systems and decisions I owned**, not a cloneable or deployable bot.
 
 ---
 
-## What's published in this repo
+## Public vs private
 
-**Intentionally narrow:** Monte Carlo + `sim_test` + the night engine they exercise — **not** a copy-paste Discord bot.
+| **Public (this GitHub repo)** | **Private (not published)** |
+|-------------------------------|-----------------------------|
+| This README — architecture, design decisions, balance methodology, representative excerpts | `engine/night.py` — ~2,450-line night resolution pipeline |
+| High-level descriptions of MC, `sim_test`, tribunal, stats, regression lattice | `game.py`, `bot_app/`, `bot.py` — Discord surface + game lifecycle |
+| Portfolio narrative for reviewers | `scripts/monte_carlo/`, `scripts/sim_test.py` — balance + QA tooling |
+| | Full pytest suite (1,100+ cases), smoke checks, fuzz/repro harnesses |
+| | Guild IDs, private-channel maps, tokens (`.env`) |
 
-| Included | Not included (on purpose) |
-|----------|---------------------------|
-| [`scripts/monte_carlo/`](scripts/monte_carlo/) — balance simulator | `bot.py`, `bot_app/` (commands, tribunal, GM UX) |
-| [`scripts/sim_test.py`](scripts/sim_test.py) — night-engine QA harness | Stats SQLite layer (`database.py`, `endgame_stats.py`, …) |
-| [`engine/night.py`](engine/night.py) + shared win/persist modules | Recovery orchestrator (`game_recovery.py`) |
-| MC + sim pytest suite | Full 1,100+ pytest lattice and static smoke suite |
-| [`deputy_rules.py`](deputy_rules.py) — Deputy shot logic shared by MC bridge | Private-channel ID maps (configure via `.env` if self-hosting) |
+**Why:** Publishing even MC/sim without the bot still ships the **rules engine** — the part worth keeping proprietary. Reviewers get depth here; the runnable implementation stays local.
 
-`bridge.py` imports **`deputy_rules`**, not `bot_app`, so publishing MC/sim does not ship the Discord command surface.
+The sections below unpack each area **without** access to the private codebase.
 
-Both tools call the same **`run_night_pipeline`** as production — balance numbers and scenario oracles exercise real night rules, not a reimplementation.
-
----
-
-This is **original product direction** for a custom rules engine and Discord game. I was the **primary decision-maker** on major behavior and architecture — what gets built, how modules split, which invariants are non-negotiable, and when wiki ToS1 is adapted vs ported literally — while the code itself was produced through AI-assisted generation. That includes tradeoffs, module boundaries, verification strategy, Discord UX, and **balance decisions** grounded in Monte Carlo and playtesting feedback loops. The same scope covers the **rules-engine boundary** (one `run_night_pipeline` for Discord, sim_test, and MC), win/endgame and combat/visit semantics, crash-safe persist and commits, and the regression lattice that defines when a bug is actually closed. Balance changes — lobby law, parallel MC infra, or a single role tweak — ship after fresh trials and regression guards pass.
+--- for a custom rules engine and Discord game. I was the **primary decision-maker** on major behavior and architecture — what gets built, how modules split, which invariants are non-negotiable, and when wiki ToS1 is adapted vs ported literally — while the code itself was produced through AI-assisted generation. That includes tradeoffs, module boundaries, verification strategy, Discord UX, and **balance decisions** grounded in Monte Carlo and playtesting feedback loops. The same scope covers the **rules-engine boundary** (one `run_night_pipeline` for Discord, sim_test, and MC), win/endgame and combat/visit semantics, crash-safe persist and commits, and the regression lattice that defines when a bug is actually closed. Balance changes — lobby law, parallel MC infra, or a single role tweak — ship after fresh trials and regression guards pass.
 
 **Representative design areas** (not an exhaustive list):
 
@@ -985,7 +981,7 @@ python scripts/mc_preflight.py --parity
 python scripts/arson_sheriff_detection_ablation_500k.py --arm both --force-both
 ```
 
-Runbook: [`scripts/monte_carlo/README.md`](scripts/monte_carlo/README.md)
+Runbook (private repo): `scripts/monte_carlo/README.md` — MC preflight, role-change checklist, `--deep` / `--quad` sim_test presets.
 
 ---
 
@@ -1317,30 +1313,11 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 
 ---
 
-## Explore locally (no Discord token)
+## Running the project
 
-```bash
-pip install -r requirements-dev.txt
+**Not possible from this repo** — there is no published source. The private codebase includes `requirements-dev.txt`, pytest, `sim_test`, and Monte Carlo entry points (`scripts/monte_carlo_sim.py`, `scripts/mc_preflight.py`). Those tools are described in the sections below; they are not downloadable here.
 
-# pytest + static smoke checks (excludes slow night_sim; matches CI)
-python -m pytest tests/ -q -m "not night_sim" --tb=no
-
-# Hardened audit regression (49-item pass)
-python -m pytest tests/test_hardened_audit_fixes.py tests/test_audit_remaining_fixes.py tests/test_master_audit_fixes_round2.py -q
-
-# MC + sim pytest (published suite)
-python -m pytest tests/test_monte_night_bridge.py tests/test_monte_engine_invariants.py tests/test_monte_carlo_report.py tests/test_sim_test_parallel.py tests/test_generator_parallel.py tests/test_mc_action_jitter.py tests/test_monte_repros.py -q
-
-# sim_test — behavioral QA
-python scripts/sim_test.py --scenarios-only
-python scripts/sim_test.py --deep                    # ~30 min · 10M+ pipeline nights
-python scripts/sim_test.py --probe-failure
-
-# Monte Carlo — balance science
-python scripts/mc_preflight.py --parity
-python scripts/monte_carlo_sim.py --generator-trials 5000 --player-count 7 --quiet
-python scripts/arson_sheriff_detection_ablation_500k.py --arm both
-```
+If you are reviewing this portfolio and want a live demo, ask me directly — I run the bot on a private Discord server.
 
 ---
 
@@ -1348,11 +1325,10 @@ python scripts/arson_sheriff_detection_ablation_500k.py --arm both
 
 | Document | Contents |
 |----------|----------|
-| [`MAFIASALEM_GDD.md`](MAFIASALEM_GDD.md) | Night pipeline, persist schema, module map |
-| [`MAFIA_GAME_GUIDE.md`](MAFIA_GAME_GUIDE.md) | Player-facing rules |
-| [`roles.py`](roles.py) | Role blurbs (`ROLE_DESCRIPTIONS`) |
-| [`scripts/monte_carlo/README.md`](scripts/monte_carlo/README.md) | MC runbook & role-change checklist |
-| [`STATS.md`](STATS.md) | Stats source of truth, GM export/import, live board setup |
+| This README | Architecture, MC/sim methodology, design scope (portfolio) |
+| `MAFIASALEM_GDD.md` | Night pipeline, persist schema — **private repo only** |
+| `MAFIA_GAME_GUIDE.md` | Player-facing rules — **private repo only** |
+| `STATS.md` | Stats system setup — **private repo only** |
 
 Screenshots: [`docs/screenshots/`](docs/screenshots/)
 
@@ -1360,10 +1336,10 @@ Screenshots: [`docs/screenshots/`](docs/screenshots/)
 
 ## License
 
-Source shared for **portfolio review**. All rights reserved — not licensed for redistribution or operating as a public bot service.
+**README-only portfolio.** No source code is licensed for redistribution, forking, or operating as a public bot service. All implementation rights reserved.
 
 ---
 
 <p align="center">
-  <strong>Rules engine · Discord front-end · pytest, sim_test, and Monte Carlo validation</strong>
+  <strong>Portfolio README · private implementation · design & balance methodology documented here</strong>
 </p>
