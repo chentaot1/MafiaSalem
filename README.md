@@ -2,23 +2,21 @@
 
 **Town-of-Salem-style mechanics on Discord — a ~2,450-line deterministic night engine, layered regression tests (pytest + static smoke checks), crash-resumable tribunal state, and Monte Carlo balance trials.**
 
-> **Portfolio README only** — no source code is published. The night engine, Discord bot, Monte Carlo simulator, `sim_test` harness, tests, and deployment config live in a **private local codebase**. I **did not hand-write the implementation** — it was **AI-generated** (Claude, Gemini, ChatGPT, then **Cursor**) under my specs, reviews, and design calls. This document describes the **systems and decisions I owned**, not a cloneable or deployable bot.
+> **Portfolio repo** — limited **Monte Carlo methodology** source + `sim_test` documentation. The **night engine**, Discord bot, full MC trial runners, and tests are **private**. See [Public vs private](#public-vs-private).
 
 ---
 
 ## Public vs private
 
-| **Public (this GitHub repo)** | **Private (not published)** |
-|-------------------------------|-----------------------------|
-| This README — architecture, design decisions, balance methodology, representative excerpts | `engine/night.py` — ~2,450-line night resolution pipeline |
-| High-level descriptions of MC, `sim_test`, tribunal, stats, regression lattice | `game.py`, `bot_app/`, `bot.py` — Discord surface + game lifecycle |
-| Portfolio narrative for reviewers | `scripts/monte_carlo/`, `scripts/sim_test.py` — balance + QA tooling |
-| | Full pytest suite (1,100+ cases), smoke checks, fuzz/repro harnesses |
-| | Guild IDs, private-channel maps, tokens (`.env`) |
+| **Published on GitHub** | **Private (local only)** |
+|-------------------------|---------------------------|
+| This README — architecture, design decisions, balance methodology | `engine/night.py` — night resolution pipeline (~2,450 lines) |
+| [`scripts/monte_carlo/`](scripts/monte_carlo/) — **day model, competence AI, role heuristics** | `game.py`, `bot_app/`, `bot.py` — Discord bot + game lifecycle |
+| [`scripts/sim_test/README.md`](scripts/sim_test/README.md) — harness architecture + 47-scenario catalog | `scripts/sim_test.py` — runnable scenario/fuzz/systematic harness |
+| [`tests/test_monte_carlo_public.py`](tests/test_monte_carlo_public.py) — tests public MC modules | `bridge.py`, `simulate.py`, `generator.py` — engine-backed trials |
+| | Full pytest suite, smoke checks, guild secrets (`.env`) |
 
-**Why:** Publishing even MC/sim without the bot still ships the **rules engine** — the part worth keeping proprietary. Reviewers get depth here; the runnable implementation stays local.
-
-The sections below unpack each area **without** access to the private codebase.
+**Why the split:** MC’s value for balance is the **statistical day layer + pub-lobby AI model** — safe to show. Nights use production `run_night_pipeline` — that stays private.
 
 --- for a custom rules engine and Discord game. I was the **primary decision-maker** on major behavior and architecture — what gets built, how modules split, which invariants are non-negotiable, and when wiki ToS1 is adapted vs ported literally — while the code itself was produced through AI-assisted generation. That includes tradeoffs, module boundaries, verification strategy, Discord UX, and **balance decisions** grounded in Monte Carlo and playtesting feedback loops. The same scope covers the **rules-engine boundary** (one `run_night_pipeline` for Discord, sim_test, and MC), win/endgame and combat/visit semantics, crash-safe persist and commits, and the regression lattice that defines when a bug is actually closed. Balance changes — lobby law, parallel MC infra, or a single role tweak — ship after fresh trials and regression guards pass.
 
@@ -1315,9 +1313,14 @@ Portfolio summary — **design direction and product decisions** I owned (AI-ass
 
 ## Running the project
 
-**Not possible from this repo** — there is no published source. The private codebase includes `requirements-dev.txt`, pytest, `sim_test`, and Monte Carlo entry points (`scripts/monte_carlo_sim.py`, `scripts/mc_preflight.py`). Those tools are described in the sections below; they are not downloadable here.
+**From GitHub:** browse the MC showcase modules and run the small public test suite:
 
-If you are reviewing this portfolio and want a live demo, ask me directly — I run the bot on a private Discord server.
+```bash
+pip install pytest
+python -m pytest tests/test_monte_carlo_public.py -q
+```
+
+**Full MC trials and `sim_test`** require the private repo (`monte_carlo_sim.py`, `engine/night.py`). Not published.
 
 ---
 
@@ -1325,10 +1328,10 @@ If you are reviewing this portfolio and want a live demo, ask me directly — I 
 
 | Document | Contents |
 |----------|----------|
-| This README | Architecture, MC/sim methodology, design scope (portfolio) |
-| `MAFIASALEM_GDD.md` | Night pipeline, persist schema — **private repo only** |
-| `MAFIA_GAME_GUIDE.md` | Player-facing rules — **private repo only** |
-| `STATS.md` | Stats system setup — **private repo only** |
+| This README | Architecture, MC/sim methodology, design scope |
+| [`scripts/monte_carlo/README.md`](scripts/monte_carlo/README.md) | Public vs private MC modules |
+| [`scripts/sim_test/README.md`](scripts/sim_test/README.md) | sim_test layers + 47-scenario catalog (**docs only**) |
+| `MAFIASALEM_GDD.md`, `MAFIA_GAME_GUIDE.md`, `STATS.md` | **Private repo only** |
 
 Screenshots: [`docs/screenshots/`](docs/screenshots/)
 
@@ -1336,10 +1339,10 @@ Screenshots: [`docs/screenshots/`](docs/screenshots/)
 
 ## License
 
-**README-only portfolio.** No source code is licensed for redistribution, forking, or operating as a public bot service. All implementation rights reserved.
+**README + limited MC showcase.** Night engine and Discord bot implementation are private. All rights reserved — not licensed for redistribution or operating as a public bot service.
 
 ---
 
 <p align="center">
-  <strong>Portfolio README · private implementation · design & balance methodology documented here</strong>
+  <strong>Portfolio · MC day/AI showcase · sim_test docs · private night engine</strong>
 </p>
